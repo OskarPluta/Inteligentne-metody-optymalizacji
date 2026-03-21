@@ -1,0 +1,18 @@
+# Build output
+tsp
+zadanie1
+*.o
+
+# Generated output files
+sol_*.txt
+viz_*.svg
+
+# CMake build dirs
+build/
+cmake-build-*/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.md 
