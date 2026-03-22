@@ -1,0 +1,31 @@
+# Binaries
+tsp
+verify
+*.o
+*.out
+*.exe
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# Build
+build/
+dist/
+
+# Data files
+*.csv
+*.xlsx
+
+# Text / checker output
+*.txt
+
+# Documentation
+*.md
+*.tex
+
+# Results directory
+results/
