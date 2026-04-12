@@ -6,6 +6,8 @@
 #include "src/algorithms/nn.h"
 #include "src/algorithms/gc.h"
 #include "src/algorithms/regret.h"
+#include "src/algorithms/local_search.h"
+#include "src/algorithms/random_walk.h"
 #include <iostream>
 #include <fstream>
 #include <iomanip>
@@ -25,10 +27,12 @@ ResultPair run_all(const Instance& inst, const std::string& label,
     std::vector<NamedResult> results, phase1_results;
 
     auto add = [&](const std::string& name, auto fn) {
+        std::cerr << "[" << label << "] " << name << "\n";
         auto res = run_experiment(inst, fn);
         results.emplace_back(name, res);
     };
     auto add_p1 = [&](const std::string& name, auto fn) {
+        std::cerr << "[" << label << "] " << name << " (phase1)\n";
         auto res = run_experiment(inst, fn);
         phase1_results.emplace_back(name, res);
     };
@@ -44,6 +48,47 @@ ResultPair run_all(const Instance& inst, const std::string& label,
     add("GCa",      [&](int start) { return greedy_cycle(inst, start, false, config); });
     add("GC",       [&](int start) { return greedy_cycle(inst, start, true,  config); });
     add("2-regret", [&](int start) { return regret2(inst, start, config); });
+
+    // Lokalne przeszukiwanie — 8 kombinacji (tryb × sąsiedztwo × start).
+    // "Najlepsza heurystyka" → 2-regret (patrz sprawozdanie z zad. 1).
+    auto add_ls = [&](const std::string& name,
+                      LSMode mode, LSNeighborhood neigh, bool heur_start) {
+        add(name, [&, mode, neigh, heur_start](int start) {
+            std::mt19937 rng(static_cast<unsigned>(start) * 2654435761u
+                             + (heur_start ? 1u : 0u));
+            Solution init = heur_start
+                ? regret2(inst, start, config)
+                : random_solution(inst, rng);
+            return local_search(inst, init, mode, neigh, rng, config);
+        });
+    };
+
+    add_ls("LSs_v_rnd", LSMode::Steepest, LSNeighborhood::NodeSwap, false);
+    add_ls("LSs_v_h",   LSMode::Steepest, LSNeighborhood::NodeSwap, true);
+    add_ls("LSs_e_rnd", LSMode::Steepest, LSNeighborhood::EdgeSwap, false);
+    add_ls("LSs_e_h",   LSMode::Steepest, LSNeighborhood::EdgeSwap, true);
+    add_ls("LSg_v_rnd", LSMode::Greedy,   LSNeighborhood::NodeSwap, false);
+    add_ls("LSg_v_h",   LSMode::Greedy,   LSNeighborhood::NodeSwap, true);
+    add_ls("LSg_e_rnd", LSMode::Greedy,   LSNeighborhood::EdgeSwap, false);
+    add_ls("LSg_e_h",   LSMode::Greedy,   LSNeighborhood::EdgeSwap, true);
+
+    // Błądzenie losowe — punkt odniesienia. Budżet czasu = średni czas
+    // najwolniejszej wersji LS (po wszystkich 8 wariantach na tej instancji).
+    double rw_budget = 0.0;
+    std::string slowest_ls;
+    for (const auto& [name, res] : results) {
+        if (name.rfind("LS", 0) == 0 && res.avg_time > rw_budget) {
+            rw_budget  = res.avg_time;
+            slowest_ls = name;
+        }
+    }
+    std::cerr << "[" << label << "] RW budget = " << rw_budget
+              << " s/uruchomienie (najwolniejszy LS: " << slowest_ls << ")\n";
+    add("RW", [&, rw_budget](int start) {
+        std::mt19937 rng(static_cast<unsigned>(start) * 2654435761u + 7u);
+        Solution init = random_solution(inst, rng);
+        return random_walk(inst, init, rw_budget, rng, config);
+    });
 
     // Tylko faza I (do tabeli w sprawozdaniu)
     add_p1("NNa-I",      [&](int start) { return nn_phase1(inst, start, false, config); });
@@ -114,12 +159,14 @@ void save_checker(const std::string& dir, const std::string& inst_name,
 void save_summary(const std::string& path,
                   const std::vector<std::pair<std::string, std::vector<NamedResult>>>& all) {
     std::ofstream f(path);
-    f << "instance,algorithm,min_obj,max_obj,avg_obj,best_start,nodes_in_best\n";
+    f << "instance,algorithm,min_obj,max_obj,avg_obj,min_time_s,max_time_s,avg_time_s,best_start,nodes_in_best\n";
     for (const auto& [inst_name, results] : all)
         for (const auto& [name, res] : results)
             f << inst_name << "," << name << ","
               << res.min_obj << "," << res.max_obj << ","
               << std::fixed << std::setprecision(1) << res.avg_obj << ","
+              << std::setprecision(6)
+              << res.min_time << "," << res.max_time << "," << res.avg_time << ","
               << res.best_start << "," << res.best.size() << "\n";
 }
 

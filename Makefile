@@ -9,7 +9,9 @@ SRCS = main.cpp \
        src/algorithms/phase2.cpp \
        src/algorithms/nn.cpp \
        src/algorithms/gc.cpp \
-       src/algorithms/regret.cpp
+       src/algorithms/regret.cpp \
+       src/algorithms/local_search.cpp \
+       src/algorithms/random_walk.cpp
 
 TARGET = tsp
 
