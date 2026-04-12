@@ -3,10 +3,14 @@
 #include <iostream>
 #include <iomanip>
 #include <chrono>
+#include <algorithm>
+#include <numeric>
+#include <random>
 
 ExperimentResult run_experiment(
     const Instance& inst,
-    const std::function<Solution(int start)>& algo)
+    const std::function<Solution(int start)>& algo,
+    int num_runs)
 {
     ExperimentResult res;
     res.min_obj    = std::numeric_limits<int>::max();
@@ -19,9 +23,17 @@ ExperimentResult run_experiment(
 
     int n = inst.n();
 
-    for (int start = 0; start < n; start++) {
-        if (start % 10 == 0) {
-            std::cerr << "\r  [" << start << "/" << n << "]   " << std::flush;
+    // Przygotuj listę wierzchołków startowych: losujemy num_runs z [0, n).
+    std::vector<int> starts(n);
+    std::iota(starts.begin(), starts.end(), 0);
+    std::mt19937 start_rng(42);
+    std::shuffle(starts.begin(), starts.end(), start_rng);
+    if (num_runs < n) starts.resize(num_runs);
+
+    for (int i = 0; i < static_cast<int>(starts.size()); i++) {
+        int start = starts[i];
+        if (i % 10 == 0) {
+            std::cerr << "\r  [" << i << "/" << num_runs << "]   " << std::flush;
         }
         auto t0 = std::chrono::steady_clock::now();
         Solution sol = algo(start);
@@ -43,9 +55,9 @@ ExperimentResult run_experiment(
         res.avg_time += elapsed;
     }
 
-    std::cerr << "\r  [" << n << "/" << n << "]   \n";
-    res.avg_obj  /= n;
-    res.avg_time /= n;
+    std::cerr << "\r  [" << num_runs << "/" << num_runs << "]   \n";
+    res.avg_obj  /= starts.size();
+    res.avg_time /= starts.size();
     return res;
 }
 

@@ -17,11 +17,12 @@ struct ExperimentResult {
     double   avg_time;
 };
 
-// Uruchamia algorytm dla każdego wierzchołka 0..n-1 jako startowego.
+// Uruchamia algorytm num_runs razy, losując wierzchołki startowe z [0, n).
 // algo(start) powinno zwrócić gotowe rozwiązanie (po obu fazach).
 ExperimentResult run_experiment(
     const Instance& inst,
-    const std::function<Solution(int start)>& algo);
+    const std::function<Solution(int start)>& algo,
+    int num_runs = 100);
 
 // Wypisuje wyniki eksperymentu w czytelnym formacie.
 void print_result(const std::string& name, const ExperimentResult& res);
