@@ -3,107 +3,137 @@
 #include "src/objective.h"
 #include "src/experiment.h"
 #include "src/algorithms/random_solution.h"
-#include "src/algorithms/nn.h"
-#include "src/algorithms/gc.h"
-#include "src/algorithms/regret.h"
-#include "src/algorithms/local_search.h"
-#include "src/algorithms/random_walk.h"
+#include "src/algorithms/local_search_cm.h"
+#include "src/algorithms/msls.h"
+#include "src/algorithms/ils.h"
+#include "src/algorithms/lns.h"
 #include <iostream>
 #include <fstream>
 #include <iomanip>
+#include <algorithm>
 #include <filesystem>
+#include <numeric>
 #include <random>
 #include <string>
 #include <vector>
 
 using NamedResult = std::pair<std::string, ExperimentResult>;
 
-// Uruchamia wszystkie algorytmy na danej instancji, wypisuje i zwraca wyniki.
-// Zwraca parę: (wyniki po fazie I+II, wyniki tylko fazy I).
-using ResultPair = std::pair<std::vector<NamedResult>, std::vector<NamedResult>>;
+// Uruchamia algorytmy z zad. 4 na danej instancji.
+//
+// Zestaw:
+//   - LSs_e_cm — najlepsza metoda LS z zad. 3 (LS stromy z ruchami
+//     kandydackimi K=10) — uruchamiana dla porównania, jako baseline
+//     (najlepsza po średniej w poprzednich iteracjach: TSPA 5854.4,
+//     TSPB 17384.2).
+//   - MSLS — Multiple Start Local Search: 200 iteracji LSs_e_cm
+//     z różnych losowych rozwiązań startowych, zwraca najlepsze.
+//   - ILS  — Iterated Local Search z małą perturbacją; warunek stopu:
+//     osiągnięcie średniego czasu MSLS na tej samej instancji.
+//   - LNS  — Large Neighborhood Search (Destroy-Repair, 30%) z LS w pętli.
+//   - LNSa — wersja LNS bez LS w pętli (LS tylko na rozwiązanie startowe).
+//
+// Wszystkie metody zad. 4 uruchamiane są 20 razy.
+struct IterStats {
+    double avg = 0.0;
+    int    mn  = 0;
+    int    mx  = 0;
+};
+struct RunAllOut {
+    std::vector<NamedResult>       results;
+    IterStats                      ils_iters;
+    IterStats                      lns_iters;
+    IterStats                      lnsa_iters;
+};
 
-ResultPair run_all(const Instance& inst, const std::string& label,
-                   const ObjectiveConfig& config) {
-    std::vector<NamedResult> results, phase1_results;
+static IterStats summarize_iters(const std::vector<int>& v) {
+    IterStats s;
+    if (v.empty()) return s;
+    s.avg = static_cast<double>(std::accumulate(v.begin(), v.end(), 0)) / v.size();
+    s.mn  = *std::min_element(v.begin(), v.end());
+    s.mx  = *std::max_element(v.begin(), v.end());
+    return s;
+}
 
-    auto add = [&](const std::string& name, auto fn) {
-        std::cerr << "[" << label << "] " << name << "\n";
-        auto res = run_experiment(inst, fn);
+RunAllOut run_all(const Instance& inst, const std::string& label,
+                  const ObjectiveConfig& config) {
+    RunAllOut out;
+    auto& results = out.results;
+
+    auto add = [&](const std::string& name, int num_runs, auto fn) {
+        std::cerr << "[" << label << "] " << name << " (runs=" << num_runs << ")\n";
+        auto res = run_experiment(inst, fn, num_runs);
         results.emplace_back(name, res);
-    };
-    auto add_p1 = [&](const std::string& name, auto fn) {
-        std::cerr << "[" << label << "] " << name << " (phase1)\n";
-        auto res = run_experiment(inst, fn);
-        phase1_results.emplace_back(name, res);
+        return res;
     };
 
-    add("Random",   [&](int start) {
-        std::mt19937 rng(start);
-        return random_solution(inst, rng);
-    });
+    constexpr int K_NEAREST = 10;
+    auto nearest = compute_nearest(inst, K_NEAREST);
 
-    // Faza I+II
-    add("NNa",      [&](int start) { return nearest_neighbor(inst, start, false, config); });
-    add("NN",       [&](int start) { return nearest_neighbor(inst, start, true,  config); });
-    add("GCa",      [&](int start) { return greedy_cycle(inst, start, false, config); });
-    add("GC",       [&](int start) { return greedy_cycle(inst, start, true,  config); });
-    add("2-regret", [&](int start) { return regret2(inst, start, config); });
-
-    // Lokalne przeszukiwanie — 8 kombinacji (tryb × sąsiedztwo × start).
-    // "Najlepsza heurystyka" → 2-regret (patrz sprawozdanie z zad. 1).
-    auto add_ls = [&](const std::string& name,
-                      LSMode mode, LSNeighborhood neigh, bool heur_start) {
-        add(name, [&, mode, neigh, heur_start](int start) {
-            std::mt19937 rng(static_cast<unsigned>(start) * 2654435761u
-                             + (heur_start ? 1u : 0u));
-            Solution init = heur_start
-                ? regret2(inst, start, config)
-                : random_solution(inst, rng);
-            return local_search(inst, init, mode, neigh, rng, config);
-        });
-    };
-
-    add_ls("LSs_v_rnd", LSMode::Steepest, LSNeighborhood::NodeSwap, false);
-    add_ls("LSs_v_h",   LSMode::Steepest, LSNeighborhood::NodeSwap, true);
-    add_ls("LSs_e_rnd", LSMode::Steepest, LSNeighborhood::EdgeSwap, false);
-    add_ls("LSs_e_h",   LSMode::Steepest, LSNeighborhood::EdgeSwap, true);
-    add_ls("LSg_v_rnd", LSMode::Greedy,   LSNeighborhood::NodeSwap, false);
-    add_ls("LSg_v_h",   LSMode::Greedy,   LSNeighborhood::NodeSwap, true);
-    add_ls("LSg_e_rnd", LSMode::Greedy,   LSNeighborhood::EdgeSwap, false);
-    add_ls("LSg_e_h",   LSMode::Greedy,   LSNeighborhood::EdgeSwap, true);
-
-    // Błądzenie losowe — punkt odniesienia. Budżet czasu = średni czas
-    // najwolniejszej wersji LS (po wszystkich 8 wariantach na tej instancji).
-    double rw_budget = 0.0;
-    std::string slowest_ls;
-    for (const auto& [name, res] : results) {
-        if (name.rfind("LS", 0) == 0 && res.avg_time > rw_budget) {
-            rw_budget  = res.avg_time;
-            slowest_ls = name;
-        }
-    }
-    std::cerr << "[" << label << "] RW budget = " << rw_budget
-              << " s/uruchomienie (najwolniejszy LS: " << slowest_ls << ")\n";
-    add("RW", [&, rw_budget](int start) {
-        std::mt19937 rng(static_cast<unsigned>(start) * 2654435761u + 7u);
+    // Baseline LS (najlepsza metoda z zad. 3).
+    add("LSs_e_cm", 20, [&, nearest](int start) {
+        std::mt19937 rng(static_cast<unsigned>(start) * 2654435761u + 3u);
         Solution init = random_solution(inst, rng);
-        return random_walk(inst, init, rw_budget, rng, config);
+        return local_search_cm(inst, init, nearest, config);
     });
 
-    // Tylko faza I (do tabeli w sprawozdaniu)
-    add_p1("NNa-I",      [&](int start) { return nn_phase1(inst, start, false, config); });
-    add_p1("NN-I",       [&](int start) { return nn_phase1(inst, start, true,  config); });
-    add_p1("GCa-I",      [&](int start) { return gc_phase1(inst, start, false, config); });
-    add_p1("GC-I",       [&](int start) { return gc_phase1(inst, start, true,  config); });
-    add_p1("2-regret-I", [&](int start) { return regret_phase1(inst, start, config); });
+    // MSLS — 200 iteracji LSs_e_cm na losowych startach, 20 uruchomień.
+    auto msls_res = add("MSLS", 20, [&, nearest](int start) {
+        std::mt19937 rng(static_cast<unsigned>(start) * 2654435761u + 17u);
+        return msls(inst, nearest, rng, 200, config);
+    });
+
+    // ILS — budżet czasowy = średni czas MSLS dla tej samej instancji.
+    double time_budget = msls_res.avg_time;
+    std::cerr << "[" << label << "] ILS time budget = "
+              << std::fixed << std::setprecision(4) << time_budget << " s\n";
+
+    std::vector<int> ils_iters;
+    add("ILS", 20, [&, nearest](int start) {
+        std::mt19937 rng(static_cast<unsigned>(start) * 2654435761u + 31u);
+        int iters = 0;
+        Solution s = ils(inst, nearest, rng, time_budget, iters, config);
+        ils_iters.push_back(iters);
+        return s;
+    });
+    out.ils_iters = summarize_iters(ils_iters);
+
+    // LNS — destroy 30% + repair (2-regret) + LS w pętli.
+    std::vector<int> lns_iters_v;
+    add("LNS", 20, [&, nearest](int start) {
+        std::mt19937 rng(static_cast<unsigned>(start) * 2654435761u + 53u);
+        int iters = 0;
+        Solution s = lns(inst, nearest, rng, time_budget, iters,
+                         /*use_local_search=*/true, /*destroy_fraction=*/0.30, config);
+        lns_iters_v.push_back(iters);
+        return s;
+    });
+    out.lns_iters = summarize_iters(lns_iters_v);
+
+    // LNSa — wersja bez LS w pętli (LS tylko na rozwiązanie startowe).
+    std::vector<int> lnsa_iters_v;
+    add("LNSa", 20, [&, nearest](int start) {
+        std::mt19937 rng(static_cast<unsigned>(start) * 2654435761u + 71u);
+        int iters = 0;
+        Solution s = lns(inst, nearest, rng, time_budget, iters,
+                         /*use_local_search=*/false, /*destroy_fraction=*/0.30, config);
+        lnsa_iters_v.push_back(iters);
+        return s;
+    });
+    out.lnsa_iters = summarize_iters(lnsa_iters_v);
 
     std::cout << "=== " << label << " (" << inst.n() << " wierzchołków) ===\n";
     for (const auto& [name, res] : results) print_result(name, res);
-    std::cout << "--- Faza I ---\n";
-    for (const auto& [name, res] : phase1_results) print_result(name, res);
+    auto print_iters = [](const std::string& name, const IterStats& s) {
+        std::cout << name << " iters: avg=" << std::fixed << std::setprecision(1)
+                  << s.avg << "  min=" << s.mn << "  max=" << s.mx << "\n";
+    };
+    print_iters("ILS  perturbation",     out.ils_iters);
+    print_iters("LNS  destroy-repair",   out.lns_iters);
+    print_iters("LNSa destroy-repair",   out.lnsa_iters);
     std::cout << "\n";
 
-    return {results, phase1_results};
+    return out;
 }
 
 // Zamienia '-' i spacje na '_' (bezpieczna nazwa pliku).
@@ -120,7 +150,6 @@ void save_paths(const std::string& dir, const Instance& inst,
     namespace fs = std::filesystem;
     fs::create_directories(dir);
 
-    // Wszystkie wierzchołki (tło mapy)
     {
         std::ofstream f(dir + "/" + inst_name + "_nodes.csv");
         f << "id,x,y,profit\n";
@@ -129,7 +158,6 @@ void save_paths(const std::string& dir, const Instance& inst,
               << inst.nodes[i].y << "," << inst.nodes[i].profit << "\n";
     }
 
-    // Najlepsza ścieżka każdego algorytmu (w kolejności cyklu)
     for (const auto& [name, res] : results) {
         std::ofstream f(dir + "/" + inst_name + "_" + safe_name(name) + "_path.csv");
         f << "step,node_id,x,y,profit\n";
@@ -176,15 +204,15 @@ int main() {
     Instance tspa = Instance::load("TSPA.csv");
     Instance tspb = Instance::load("TSPB.csv");
 
-    auto [res_a, p1_a] = run_all(tspa, "TSPA.csv", config);
-    auto [res_b, p1_b] = run_all(tspb, "TSPB.csv", config);
+    auto out_a = run_all(tspa, "TSPA.csv", config);
+    auto out_b = run_all(tspb, "TSPB.csv", config);
 
-    save_paths("results", tspa, "TSPA", res_a);
-    save_paths("results", tspb, "TSPB", res_b);
-    save_checker("results", "TSPA", res_a);
-    save_checker("results", "TSPB", res_b);
-    save_summary("results/results.csv", {{"TSPA", res_a}, {"TSPB", res_b}});
-    save_summary("results/results_phase1.csv", {{"TSPA", p1_a}, {"TSPB", p1_b}});
+    save_paths("results", tspa, "TSPA", out_a.results);
+    save_paths("results", tspb, "TSPB", out_b.results);
+    save_checker("results", "TSPA", out_a.results);
+    save_checker("results", "TSPB", out_b.results);
+    save_summary("results/results.csv",
+                 {{"TSPA", out_a.results}, {"TSPB", out_b.results}});
 
     std::cout << "Dane zapisane do katalogu results/\n";
     return 0;

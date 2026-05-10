@@ -11,6 +11,11 @@ SRCS = main.cpp \
        src/algorithms/gc.cpp \
        src/algorithms/regret.cpp \
        src/algorithms/local_search.cpp \
+       src/algorithms/local_search_lm.cpp \
+       src/algorithms/local_search_cm.cpp \
+       src/algorithms/msls.cpp \
+       src/algorithms/ils.cpp \
+       src/algorithms/lns.cpp \
        src/algorithms/random_walk.cpp
 
 TARGET = tsp

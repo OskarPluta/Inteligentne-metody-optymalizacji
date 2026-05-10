@@ -9,10 +9,8 @@ import matplotlib.pyplot as plt
 
 RESULTS_DIR = Path("results")
 ALGOS = [
-    "Random", "NNa", "NN", "GCa", "GC", "2-regret",
-    "LSs_v_rnd", "LSs_v_h", "LSs_e_rnd", "LSs_e_h",
-    "LSg_v_rnd", "LSg_v_h", "LSg_e_rnd", "LSg_e_h",
-    "RW",
+    "LSs_e_cm",
+    "MSLS", "ILS", "LNS", "LNSa",
 ]
 INSTANCES = ["TSPA", "TSPB"]
 
