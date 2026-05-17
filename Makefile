@@ -20,8 +20,19 @@ SRCS = main.cpp \
 
 TARGET = tsp
 
+Z5_SRCS = zadanie5.cpp \
+          src/instance.cpp \
+          src/solution.cpp \
+          src/algorithms/random_solution.cpp \
+          src/algorithms/local_search.cpp
+
+Z5_TARGET = zadanie5
+
 $(TARGET): $(SRCS)
 	$(CXX) $(CXXFLAGS) -o $(TARGET) $(SRCS)
 
+$(Z5_TARGET): $(Z5_SRCS)
+	$(CXX) $(CXXFLAGS) -o $(Z5_TARGET) $(Z5_SRCS)
+
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) $(Z5_TARGET)
