@@ -7,6 +7,7 @@
 #include "src/algorithms/msls.h"
 #include "src/algorithms/ils.h"
 #include "src/algorithms/lns.h"
+#include "src/algorithms/hae.h"
 #include <iostream>
 #include <fstream>
 #include <iomanip>
@@ -34,24 +35,17 @@ using NamedResult = std::pair<std::string, ExperimentResult>;
 //   - LNSa — wersja LNS bez LS w pętli (LS tylko na rozwiązanie startowe).
 //
 // Wszystkie metody zad. 4 uruchamiane są 20 razy.
-struct IterStats {
-    double avg = 0.0;
-    int    mn  = 0;
-    int    mx  = 0;
-};
 struct RunAllOut {
-    std::vector<NamedResult>       results;
-    IterStats                      ils_iters;
-    IterStats                      lns_iters;
-    IterStats                      lnsa_iters;
+    std::vector<NamedResult> results;
 };
 
 static IterStats summarize_iters(const std::vector<int>& v) {
     IterStats s;
     if (v.empty()) return s;
-    s.avg = static_cast<double>(std::accumulate(v.begin(), v.end(), 0)) / v.size();
-    s.mn  = *std::min_element(v.begin(), v.end());
-    s.mx  = *std::max_element(v.begin(), v.end());
+    s.avg     = static_cast<double>(std::accumulate(v.begin(), v.end(), 0)) / v.size();
+    s.mn      = *std::min_element(v.begin(), v.end());
+    s.mx      = *std::max_element(v.begin(), v.end());
+    s.present = true;
     return s;
 }
 
@@ -60,11 +54,11 @@ RunAllOut run_all(const Instance& inst, const std::string& label,
     RunAllOut out;
     auto& results = out.results;
 
-    auto add = [&](const std::string& name, int num_runs, auto fn) {
+    auto add = [&](const std::string& name, int num_runs, auto fn) -> ExperimentResult& {
         std::cerr << "[" << label << "] " << name << " (runs=" << num_runs << ")\n";
         auto res = run_experiment(inst, fn, num_runs);
-        results.emplace_back(name, res);
-        return res;
+        results.emplace_back(name, std::move(res));
+        return results.back().second;
     };
 
     constexpr int K_NEAREST = 10;
@@ -89,18 +83,18 @@ RunAllOut run_all(const Instance& inst, const std::string& label,
               << std::fixed << std::setprecision(4) << time_budget << " s\n";
 
     std::vector<int> ils_iters;
-    add("ILS", 20, [&, nearest](int start) {
+    auto& ils_res = add("ILS", 20, [&, nearest](int start) {
         std::mt19937 rng(static_cast<unsigned>(start) * 2654435761u + 31u);
         int iters = 0;
         Solution s = ils(inst, nearest, rng, time_budget, iters, config);
         ils_iters.push_back(iters);
         return s;
     });
-    out.ils_iters = summarize_iters(ils_iters);
+    ils_res.iters = summarize_iters(ils_iters);
 
     // LNS — destroy 30% + repair (2-regret) + LS w pętli.
     std::vector<int> lns_iters_v;
-    add("LNS", 20, [&, nearest](int start) {
+    auto& lns_res = add("LNS", 20, [&, nearest](int start) {
         std::mt19937 rng(static_cast<unsigned>(start) * 2654435761u + 53u);
         int iters = 0;
         Solution s = lns(inst, nearest, rng, time_budget, iters,
@@ -108,11 +102,11 @@ RunAllOut run_all(const Instance& inst, const std::string& label,
         lns_iters_v.push_back(iters);
         return s;
     });
-    out.lns_iters = summarize_iters(lns_iters_v);
+    lns_res.iters = summarize_iters(lns_iters_v);
 
     // LNSa — wersja bez LS w pętli (LS tylko na rozwiązanie startowe).
     std::vector<int> lnsa_iters_v;
-    add("LNSa", 20, [&, nearest](int start) {
+    auto& lnsa_res = add("LNSa", 20, [&, nearest](int start) {
         std::mt19937 rng(static_cast<unsigned>(start) * 2654435761u + 71u);
         int iters = 0;
         Solution s = lns(inst, nearest, rng, time_budget, iters,
@@ -120,17 +114,39 @@ RunAllOut run_all(const Instance& inst, const std::string& label,
         lnsa_iters_v.push_back(iters);
         return s;
     });
-    out.lnsa_iters = summarize_iters(lnsa_iters_v);
+    lnsa_res.iters = summarize_iters(lnsa_iters_v);
+
+    // HAE — hybrydowy algorytm ewolucyjny (zad. 6) z trzema operatorami
+    // rekombinacji; warianty 2 i 3 testujemy też bez LS po rekombinacji.
+    auto run_hae = [&](const std::string& name, HaeOperator op, bool use_ls,
+                       unsigned seed_off) {
+        std::vector<int> iters_v;
+        auto& res = add(name, 20, [&, nearest](int start) {
+            std::mt19937 rng(static_cast<unsigned>(start) * 2654435761u + seed_off);
+            int iters = 0;
+            Solution s = hae(inst, nearest, rng, time_budget, iters, op,
+                             /*use_local_search=*/use_ls, /*pop_size=*/20, config);
+            iters_v.push_back(iters);
+            return s;
+        });
+        res.iters = summarize_iters(iters_v);
+    };
+
+    run_hae("HAE1",  HaeOperator::Op1, true,  101u);
+    run_hae("HAE2",  HaeOperator::Op2, true,  103u);
+    run_hae("HAE2a", HaeOperator::Op2, false, 107u);
+    run_hae("HAE3",  HaeOperator::Op3, true,  109u);
+    run_hae("HAE3a", HaeOperator::Op3, false, 113u);
 
     std::cout << "=== " << label << " (" << inst.n() << " wierzchołków) ===\n";
-    for (const auto& [name, res] : results) print_result(name, res);
-    auto print_iters = [](const std::string& name, const IterStats& s) {
-        std::cout << name << " iters: avg=" << std::fixed << std::setprecision(1)
-                  << s.avg << "  min=" << s.mn << "  max=" << s.mx << "\n";
-    };
-    print_iters("ILS  perturbation",     out.ils_iters);
-    print_iters("LNS  destroy-repair",   out.lns_iters);
-    print_iters("LNSa destroy-repair",   out.lnsa_iters);
+    for (const auto& [name, res] : results) {
+        print_result(name, res);
+        if (res.iters.present) {
+            std::cout << "             iters: avg=" << std::fixed << std::setprecision(1)
+                      << res.iters.avg << "  min=" << res.iters.mn
+                      << "  max=" << res.iters.mx << "\n";
+        }
+    }
     std::cout << "\n";
 
     return out;
@@ -187,15 +203,23 @@ void save_checker(const std::string& dir, const std::string& inst_name,
 void save_summary(const std::string& path,
                   const std::vector<std::pair<std::string, std::vector<NamedResult>>>& all) {
     std::ofstream f(path);
-    f << "instance,algorithm,min_obj,max_obj,avg_obj,min_time_s,max_time_s,avg_time_s,best_start,nodes_in_best\n";
+    f << "instance,algorithm,min_obj,max_obj,avg_obj,min_time_s,max_time_s,avg_time_s,"
+         "best_start,nodes_in_best,min_iters,max_iters,avg_iters\n";
     for (const auto& [inst_name, results] : all)
-        for (const auto& [name, res] : results)
+        for (const auto& [name, res] : results) {
             f << inst_name << "," << name << ","
               << res.min_obj << "," << res.max_obj << ","
               << std::fixed << std::setprecision(1) << res.avg_obj << ","
               << std::setprecision(6)
               << res.min_time << "," << res.max_time << "," << res.avg_time << ","
-              << res.best_start << "," << res.best.size() << "\n";
+              << res.best_start << "," << res.best.size() << ",";
+            if (res.iters.present)
+                f << res.iters.mn << "," << res.iters.mx << ","
+                  << std::fixed << std::setprecision(1) << res.iters.avg;
+            else
+                f << ",,";
+            f << "\n";
+        }
 }
 
 int main() {

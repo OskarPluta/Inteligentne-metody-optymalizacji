@@ -16,6 +16,7 @@ SRCS = main.cpp \
        src/algorithms/msls.cpp \
        src/algorithms/ils.cpp \
        src/algorithms/lns.cpp \
+       src/algorithms/hae.cpp \
        src/algorithms/random_walk.cpp
 
 TARGET = tsp

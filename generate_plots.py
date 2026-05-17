@@ -11,6 +11,7 @@ RESULTS_DIR = Path("results")
 ALGOS = [
     "LSs_e_cm",
     "MSLS", "ILS", "LNS", "LNSa",
+    "HAE1", "HAE2", "HAE2a", "HAE3", "HAE3a",
 ]
 INSTANCES = ["TSPA", "TSPB"]
 

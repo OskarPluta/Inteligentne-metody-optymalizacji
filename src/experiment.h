@@ -4,17 +4,31 @@
 #include <functional>
 #include <string>
 
+// Statystyki liczby iteracji "zewnętrznych" algorytmu (np. perturbacji ILS,
+// destroy-repair LNS, steady-state HAE). Pole `present` rozróżnia "brak danych"
+// (algorytm nie raportuje iteracji) od "0 iteracji w żadnym uruchomieniu".
+struct IterStats {
+    double avg     = 0.0;
+    int    mn      = 0;
+    int    mx      = 0;
+    bool   present = false;
+};
+
 struct ExperimentResult {
-    int      min_obj;
-    int      max_obj;
-    double   avg_obj;
-    Solution best;       // rozwiązanie z najwyższą wartością f.celu
-    int      best_start; // wierzchołek startowy który dał najlepszy wynik
+    int       min_obj;
+    int       max_obj;
+    double    avg_obj;
+    Solution  best;       // rozwiązanie z najwyższą wartością f.celu
+    int       best_start; // wierzchołek startowy który dał najlepszy wynik
 
     // Czas pojedynczego uruchomienia algorytmu (sekundy).
-    double   min_time;
-    double   max_time;
-    double   avg_time;
+    double    min_time;
+    double    max_time;
+    double    avg_time;
+
+    // Liczba iteracji zewnętrznych (opcjonalna — wypełniana ręcznie po
+    // uruchomieniu eksperymentu, gdy algorytm ją raportuje).
+    IterStats iters;
 };
 
 // Uruchamia algorytm num_runs razy, losując wierzchołki startowe z [0, n).
